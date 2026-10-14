@@ -5,8 +5,9 @@ A user rates 1 iff none of their features is violated anywhere in the trajectory
 
 Environment-agnostic: the env module supplies FEATURES, THR_RANGES (per-feature threshold
 range users sample from), GROUPS [(name, feats, count)], N_RANDOM, and
-feature_mask(tr, feat, thr) -> [N, T] bool. Features used by the "rare" group are kept out
-of the random users so that group stays a genuine long tail.
+feature_mask(tr, feat, thr) -> [N, T] bool, and optionally SHARED_FEATURES that every user
+dislikes. Features used by the "rare" group are kept out of the random users so that group
+stays a genuine long tail.
 """
 import numpy as np
 
@@ -15,12 +16,14 @@ def make_population(env, rng, eps=0.05, scale=1):
     users = []
     for name, feats, count in env.GROUPS:
         users += [dict(group=name, feats=list(feats)) for _ in range(count * scale)]
+    shared = list(getattr(env, "SHARED_FEATURES", []))
     rare = {f for name, feats, _ in env.GROUPS if name == "rare" for f in feats}
-    common = [f for f in env.FEATURES if f not in rare]
+    common = [f for f in env.FEATURES if f not in rare and f not in shared]
     for _ in range(env.N_RANDOM * scale):
         feats = list(rng.choice(common, size=rng.integers(1, 4), replace=False))
         users.append(dict(group="random", feats=feats))
     for u in users:
+        u["feats"] += [f for f in shared if f not in u["feats"]]
         u["thr"] = {f: float(rng.uniform(*env.THR_RANGES[f])) for f in u["feats"]}
         u["eps"] = eps
     return users

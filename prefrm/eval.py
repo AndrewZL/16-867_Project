@@ -36,9 +36,18 @@ def _head(pen, k):
     return pen[..., 0] if pen.shape[-1] == 1 else pen[..., k]
 
 
-def rating_accuracy(pen, y_clean):
-    return np.array([((np.exp(-_head(pen, k).sum(1)) > 0.5) == (y_clean[k] > 0.5)).mean()
-                     for k in range(len(y_clean))])
+def rating_metrics(pen, y_clean):
+    """Per-user accuracy, balanced accuracy, and AUROC of P(y=1) vs clean labels; plus the
+    majority-label accuracy, since with rare complaints plain accuracy is mostly base rate."""
+    out = dict(acc=[], bal_acc=[], auc=[], majority=[])
+    for k in range(len(y_clean)):
+        p, y = np.exp(-_head(pen, k).sum(1)), y_clean[k] > 0.5
+        pred = p > 0.5
+        out["acc"].append((pred == y).mean())
+        out["bal_acc"].append(np.mean([(pred[y == c] == c).mean() for c in (True, False) if (y == c).any()]))
+        out["auc"].append(auroc(p, y))
+        out["majority"].append(max(y.mean(), 1 - y.mean()))
+    return {k: np.array(v) for k, v in out.items()}
 
 
 def credit_assignment(env, pen, tr, pop):
@@ -61,20 +70,22 @@ def credit_assignment(env, pen, tr, pop):
             for f, v in res.items()}
 
 
-def rerank(env, pen_single, pen_per_user, tr, pop, rng):
-    """pen_*: step penalties on the candidate set, [N, T, H]."""
+def rerank(env, pen_single, pen_multi, tr, pop, rng):
+    """pen_single: [N, T, 1] step penalties of the pooled model on the candidate set;
+    pen_multi: {name: [N, T, K]} for each per-user model."""
     y_clean, _ = U.clean_labels(env, tr, pop)                     # [K, N]
     groups = [g for g in (np.where(tr["scenario"] == s)[0] for s in np.unique(tr["scenario"])) if len(g) > 1]
 
-    traj_lp = -pen_per_user.sum(1)                                # [N, K]
-    scores = {
-        "single head": -pen_single[..., 0].sum(1),
-        "per-user mean": traj_lp.mean(1),
-        "per-user min (traj)": traj_lp.min(1),
-        "per-user min (step)": -pen_per_user.max(2).sum(1),      # r = min_k r_k per step
-    }
+    scores = {"single head": -pen_single[..., 0].sum(1)}
+    for name, pen in pen_multi.items():
+        traj_lp = -pen.sum(1)                                     # [N, K]
+        scores[f"{name} mean"] = traj_lp.mean(1)
+        scores[f"{name} min (traj)"] = traj_lp.min(1)
+        scores[f"{name} min (step)"] = -pen.max(2).sum(1)        # r = min_k r_k per step
     picks = {name: [g[np.argmax(s[g])] for g in groups] for name, s in scores.items()}
     picks["random"] = [rng.choice(g) for g in groups]
+    if "cand" in tr:  # candidate 0 is the clean reference driver when collected with --ref-cand
+        picks["reference (cand 0)"] = [g[np.argmin(tr["cand"][g])] for g in groups]
     picks["oracle (max #sat)"] = [g[np.argmax(y_clean[:, g].sum(0))] for g in groups]
 
     rare = [k for k, u in enumerate(pop) if u["group"] == "rare"]

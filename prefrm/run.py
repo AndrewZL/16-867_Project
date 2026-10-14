@@ -68,6 +68,8 @@ def main():
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--labels-per-user", type=int, default=0, help="cap on training labels per user (0 = no cap)")
     ap.add_argument("--pop-scale", type=int, default=1, help="multiply the number of users in every group")
+    ap.add_argument("--prior", type=float, default=0.1,
+                    help="penalty on per-user corrections around the population head (shared model)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default=None, help="default: out/<env>")
     known, _ = ap.parse_known_args()
@@ -109,11 +111,14 @@ def main():
                                   for k in range(len(pop))])
     print(f"  training labels: {len(rows_tr)} ({len(rows_tr) / len(pop):.0f} per user)")
 
+    # single: one pooled head; per_user: independent heads; shared: population head + penalized
+    # per-user corrections. All share the encoder architecture.
     models = {}
-    for name, H in [("per_user", len(pop)), ("single", 1)]:
+    for name, H, shared in [("single", 1, False), ("per_user", len(pop), False), ("shared", len(pop), True)]:
         print(f"training {name}")
-        models[name] = train(RewardModel(obs.shape[-1], H, horizon=obs.shape[1]).to(device), obs, rows_tr,
-                             epochs=args.epochs, single_head=(H == 1))
+        model = RewardModel(obs.shape[-1], H, horizon=obs.shape[1], shared=shared).to(device)
+        models[name] = train(model, obs, rows_tr, epochs=args.epochs, single_head=(H == 1),
+                             prior=args.prior if shared else 0.0)
 
     te = np.where(is_test)[0]
     tr_te = take(tr, te)
@@ -123,9 +128,12 @@ def main():
 
     print("\n(i) held-out rating accuracy vs clean labels")
     for name in models:
-        acc = E.rating_accuracy(pen[name], y_clean[:, te])
-        results[f"acc_{name}"] = acc.tolist()
-        print(f"  {name:9s} mean {acc.mean():.3f}  worst {acc.min():.3f}  rare user {acc[rare].mean():.3f}")
+        m = E.rating_metrics(pen[name], y_clean[:, te])
+        results[f"acc_{name}"] = m["acc"].tolist()
+        results[f"rating_{name}"] = {k: v.tolist() for k, v in m.items()}
+        print(f"  {name:9s} acc {m['acc'].mean():.3f} (majority {m['majority'].mean():.3f})  "
+              f"balanced {m['bal_acc'].mean():.3f}  AUROC mean {np.nanmean(m['auc']):.3f} "
+              f"worst {np.nanmin(m['auc']):.3f} rare {np.nanmean(m['auc'][rare]):.3f}")
 
     print("\n(ii) credit assignment (pairs where exactly one of the user's features is violated)")
     print(f"  {'feature':12s} " + "  ".join(f"{n + ' AUC':>14s} {n + ' IoU':>14s}" for n in models))
@@ -139,18 +147,18 @@ def main():
     if tr_rr is not None:
         obs_rr = to_t(env.observations(tr_rr))
         rr = E.rerank(env, E.step_penalties(models["single"], obs_rr),
-                      E.step_penalties(models["per_user"], obs_rr), tr_rr, pop, rng)
+                      {n: E.step_penalties(models[n], obs_rr) for n in ("per_user", "shared")}, tr_rr, pop, rng)
         results["rerank"] = rr
         print(f"\n(iii) reranking on {rr.pop('_n_scenarios')} unseen scenarios (per-user satisfaction)")
         print(f"  scenarios where some candidate satisfies everyone: {rr.pop('_feasible_all_satisfied'):.2f}")
-        print(f"  {'selector':22s} {'mean':>6s} {'worst':>6s} {'rare':>6s} {'all-sat':>8s}")
+        print(f"  {'selector':24s} {'mean':>6s} {'worst':>6s} {'rare':>6s} {'all-sat':>8s}")
         for name, m in rr.items():
-            print(f"  {name:22s} {m['mean']:6.3f} {m['worst_user']:6.3f} {m['rare_user']:6.3f} {m['all_satisfied']:8.3f}")
+            print(f"  {name:24s} {m['mean']:6.3f} {m['worst_user']:6.3f} {m['rare_user']:6.3f} {m['all_satisfied']:8.3f}")
 
     ex = np.where(y_clean[rare[0], te] == 0)[0][:3] if rare else np.arange(3)
     tag = f"eps{args.eps}"
     plot_examples(os.path.join(out, f"example_{tag}.png"), env, tr_te,
-                  pen["per_user"], pen["single"][..., 0], pop, y_clean[:, te], ex)
+                  pen["shared"], pen["single"][..., 0], pop, y_clean[:, te], ex)
     with open(os.path.join(out, f"results_{tag}.json"), "w") as fh:
         json.dump(results, fh, indent=1)
     print(f"\nwrote {out}/results_{tag}.json and example_{tag}.png")

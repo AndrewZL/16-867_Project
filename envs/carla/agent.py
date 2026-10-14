@@ -17,6 +17,8 @@ sys.path.append(os.path.join(CARLA_ROOT, "PythonAPI", "carla"))
 from agents.navigation.behavior_agent import BehaviorAgent  # noqa: E402
 from agents.navigation.behavior_types import Normal  # noqa: E402
 
+from envs.carla import DEFAULT_STYLE  # noqa: E402
+
 
 def sample_style(rng):
     # speeds in km/h, as BehaviorAgent expects
@@ -32,21 +34,20 @@ def sample_style(rng):
 
 
 def default_style():
-    """BehaviorAgent's stock 'normal' profile: the unperturbed reference driver."""
-    return dict(max_speed=50.0, speed_lim_dist=3.0, speed_decrease=10.0, safety_time=3.0,
-                braking_distance=5.0, min_proximity_threshold=10.0, ignore_lights=False)
+    return dict(DEFAULT_STYLE)
 
 
-def sample_events(rng, duration):
-    """Each event type occurs at most once, at a uniformly random time (s)."""
+def sample_events(rng, duration, scale=1.0):
+    """Each event type occurs at most once, at a uniformly random time (s).
+    `scale` multiplies the event probabilities (0 disables events)."""
     ev = {}
-    if rng.random() < 0.35:
+    if rng.random() < 0.35 * scale:
         ev["wobble"] = dict(t0=rng.uniform(1, duration - 3), dur=rng.uniform(1.5, 3.0),
                             amp=rng.uniform(0.15, 0.3), freq=rng.uniform(0.6, 1.2))
-    if rng.random() < 0.3:
+    if rng.random() < 0.3 * scale:
         ev["brake"] = dict(t0=rng.uniform(1, duration - 1), dur=rng.uniform(0.5, 0.9),
                            mag=rng.uniform(0.7, 1.0))
-    if rng.random() < 0.4:
+    if rng.random() < 0.4 * scale:
         ev["drift"] = dict(t0=rng.uniform(1, duration - 4), dur=rng.uniform(2.0, 4.0),
                            off=rng.choice([-1, 1]) * rng.uniform(0.8, 1.5))
     return ev

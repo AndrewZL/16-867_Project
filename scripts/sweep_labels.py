@@ -12,6 +12,7 @@ import sys
 
 import numpy as np
 
+MODELS = ("single", "per_user", "shared")
 
 def main():
     ap = argparse.ArgumentParser()
@@ -35,19 +36,18 @@ def main():
                 r = json.load(open(res_path))
                 rare = [k for k, u in enumerate(r["users"]) if u["group"] == "rare"]
                 row = dict(scale=scale, L=L, seed=seed, n_users=len(r["users"]))
-                for m in ("per_user", "single"):
-                    acc = np.array(r[f"acc_{m}"])
-                    row[f"{m}_acc"], row[f"{m}_worst"], row[f"{m}_rare"] = acc.mean(), acc.min(), acc[rare].mean()
-                    row[f"{m}_auc"] = np.nanmean([v["auc"] for v in r[f"credit_{m}"].values()])
+                for m in MODELS:
+                    auc = np.array(r[f"rating_{m}"]["auc"])     # per-user AUROC of P(good): base-rate free
+                    row[f"{m}_acc"], row[f"{m}_worst"], row[f"{m}_rare"] = np.nanmean(auc), np.nanmin(auc), np.nanmean(auc[rare])
+                    row[f"{m}_credit"] = np.nanmean([v["auc"] for v in r[f"credit_{m}"].values()])
                 rr = r.get("rerank", {})
-                for sel in ("single head", "per-user min (step)", "oracle (max #sat)"):
+                for sel in ("single head", "per_user min (step)", "shared min (step)", "oracle (max #sat)"):
                     if sel in rr:
                         row[f"rr_{sel}"] = rr[sel]["mean"]
                         row[f"rr_worst_{sel}"] = rr[sel]["worst_user"]
                 rows.append(row)
-                print(f"x{scale} L={L:4d} seed {seed}: per-user acc {row['per_user_acc']:.3f} "
-                      f"(worst {row['per_user_worst']:.3f}, rare {row['per_user_rare']:.3f})  "
-                      f"single {row['single_acc']:.3f}", flush=True)
+                print(f"x{scale} L={L:4d} seed {seed}: rating AUROC " + "  ".join(
+                    f"{m} {row[m + '_acc']:.3f} (worst {row[m + '_worst']:.3f})" for m in MODELS), flush=True)
 
     # aggregate over seeds
     keys = [k for k in rows[0] if k not in ("scale", "L", "seed", "n_users")]
@@ -60,12 +60,11 @@ def main():
                                 **{k + "_sd": float(np.std([r[k] for r in g])) for k in keys}))
     json.dump(dict(runs=rows, summary=summary), open(os.path.join(root, "summary.json"), "w"), indent=1)
 
-    print(f"\n{'users':>5s} {'L':>4s} | {'per-user acc':>12s} {'worst':>6s} {'rare':>6s} {'AUC':>5s} | "
-          f"{'single acc':>10s} {'worst':>6s} | {'rerank mean min-step/single':>27s}")
+    print(f"\nper-user rating AUROC, mean / worst user / rare user (credit = per-step AUROC)")
+    print(f"{'users':>5s} {'L':>4s} | " + " | ".join(f"{m:>26s}" for m in MODELS))
     for s in summary:
-        print(f"{s['n_users']:5d} {s['L']:4d} | {s['per_user_acc']:12.3f} {s['per_user_worst']:6.3f} "
-              f"{s['per_user_rare']:6.3f} {s['per_user_auc']:5.2f} | {s['single_acc']:10.3f} {s['single_worst']:6.3f} | "
-              f"{s.get('rr_per-user min (step)', float('nan')):13.3f} / {s.get('rr_single head', float('nan')):.3f}")
+        print(f"{s['n_users']:5d} {s['L']:4d} | " + " | ".join(
+            f"{s[m + '_acc']:.3f} {s[m + '_worst']:.3f} {s[m + '_rare']:.3f} c{s[m + '_credit']:.2f}" for m in MODELS))
 
     import matplotlib
     matplotlib.use("Agg")
@@ -76,11 +75,11 @@ def main():
         L = [s["L"] for s in g]
         n = g[0]["n_users"]
         for ax, key, title in zip(axes, ["acc", "worst", "rare"], ["mean user", "worst user", "rare user"]):
-            for m, ls in (("per_user", "-"), ("single", ":")):
+            for m, ls in (("shared", "-"), ("per_user", "--"), ("single", ":")):
                 ax.errorbar(L, [s[f"{m}_{key}"] for s in g], yerr=[s[f"{m}_{key}_sd"] for s in g],
                             ls=ls, marker="o", capsize=3, label=f"{m}, {n} users")
-            ax.set_xscale("log"); ax.set_xlabel("training labels per user"); ax.set_title(f"held-out accuracy: {title}")
-    axes[0].set_ylabel("accuracy vs clean labels"); axes[0].legend(fontsize=8)
+            ax.set_xscale("log"); ax.set_xlabel("training labels per user"); ax.set_title(f"rating AUROC: {title}")
+    axes[0].set_ylabel("per-user AUROC of P(good)"); axes[0].legend(fontsize=8)
     fig.tight_layout()
     fig.savefig(os.path.join(root, "curves.png"), dpi=110)
     print(f"\nwrote {root}/summary.json and curves.png")

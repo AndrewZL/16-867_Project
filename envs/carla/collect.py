@@ -210,9 +210,15 @@ def main():
     ap.add_argument("--vehicles", type=int, default=40)
     ap.add_argument("--walkers", type=int, default=40)
     ap.add_argument("--seed", type=int, default=0, help="shard seed; scenario ids are seed*1e5 + index")
-    ap.add_argument("--clean", action="store_true", help="unperturbed reference: default style, no events")
+    ap.add_argument("--style", choices=["sampled", "default"], default="sampled")
+    ap.add_argument("--event-scale", type=float, default=1.0, help="multiplier on event probabilities (0 = none)")
+    ap.add_argument("--clean", action="store_true", help="shorthand for --style default --event-scale 0")
+    ap.add_argument("--ref-cand", action="store_true",
+                    help="candidate 0 of every scenario is the clean reference driver")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
+    if args.clean:
+        args.style, args.event_scale = "default", 0.0
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
 
     client = connect(args.host, args.port)
@@ -239,10 +245,9 @@ def main():
             scen = dict(seed=sid, spawn=int(srng.integers(len(spawns))), dest=int(srng.integers(len(spawns))))
             for c in range(args.cands):
                 prng = np.random.default_rng([sid, c])
-                if args.clean:
-                    style, events = default_style(), {}
-                else:
-                    style, events = sample_style(prng), sample_events(prng, args.seconds)
+                ref = args.ref_cand and c == 0
+                style = default_style() if ref or args.style == "default" else sample_style(prng)
+                events = {} if ref else sample_events(prng, args.seconds, args.event_scale)
                 t0 = time.time()
                 try:
                     log = run_episode(client, world, tm, grp, scen, style, events, args)
