@@ -1,0 +1,101 @@
+
+\section{Motivation}
+\label{sec:introduction}
+% \textcolor{blue}{(describe the context of your project. What is the setting / environment, tasks, or human-robot interaction you are considering, etc? Who do you think will be most interested in your project? What will your project enable in the future?)}
+
+We consider learning a reward model that satisfies heterogeneous user preferences from conflicting user ratings. Our setting will be part of the broader robot policy post-training paradigm from sparse, trajectory-level ratings provided by human users in two settings: tabletop manipulation and driving. 
+The premise is that different users often provide conflicting ratings for similar or even identical trajectories due to unobserved, individual-specific preferences over trajectory attributes. 
+
+Consider a driving trajectory rated by users: X gives a 0 solely because of a wobbly lane change, but the rest of the users didn't mind it and gave a 1. 
+Existing reward-modeling approaches seek to infer an explanation of aggregate human feedback, which averages and dilutes X's complaint, inaccurately treating the population as having common preferences.
+In this case, the right response is likely to satisfy everyone by fixing the lane change, not to ignore X.
+
+In this project, we hypothesize that individual users maintain (somewhat) consistent internal preference models over trajectory sub-features that can be used to isolate credit assignment (segments of the trajectory that explain their rating). We then ask: can a set of reward models recover user-specific credit assignment despite sparse feedback, and can these models be aggregated to satisfy all user preferences whenever possible?
+
+This is relevant to developers of deployed robot systems that have limited human data but care about long-tail user satisfaction without extensive personalization, as well as to end users who want the robot to be aligned to their preferences.
+
+\section{Open Challenge(s)} 
+\label{sec:challenges}
+% \textcolor{blue}{(what is the core challenge (or challenges) you want to tackle? What makes your problem hard? What has been holding us back from solving this; i.e., why don't we have an answer to this yet?)}
+In our project, the core challenge is user-specific credit assignment---identifying which part of a trajectory caused the observed feedback from a user---while assuming trajectory-level sparse feedback. 
+
+\textbf{(1) Sparse evaluative feedback and temporal credit assignment}. In contrast to methods like Corrective \citep{christiano2017deep} or Pairwise Comparative Feedback \citep{sharma2022correcting}, which require additional user effort that is often unrealistic for real world robot deployment, we focus on evaluative feedback, which only allows a binary label per rollout \citep{warnell2018deep}. 
+\textbf{(2) Heterogeneous preferences and conflicting feedback}. Because users may have different preferences, similar trajectories can receive conflicting ratings. Moreover, different users may care about different trajectory attributes. A reward model trained by simply aggregating these ratings can blur these differences, which can neglect individual user preferences and their negative ratings.
+
+Recent work has explored the open challenge of pluralistic and personalized reward modeling, which does not neglect heterogeneous preferences like standard reward models \cite{chakraborty2024maxmin, 3737916.3739580, barreto2025capturing}. Our project builds on this perspective but focuses on the \textit{evaluative} feedback setting in the \textit{robotics} domain and aims to learn a single model that satisfies the \textit{long-tail} of user preferences. 
+
+% We identify three common paradigms:\textbf{(1) pairwise comparative feedback}, where humans compare two policy rollouts, as in \textbf{RLHF} (Reinforcement Learning with Human Feedback) or \textbf{PbRL} (Preference based Reinforcement Learning). This gives a clear signal for credit assignment, but it requires dedicated labeling in a way that is not natural for post-deployment improvement. \textbf{(2) evaluative feedback}, has the user rate a rollout with a binary label. This is well suited for deployment but suffers from credit assignment because of the sparsity of the feedback. \textbf{(3) corrective feedback}, involves the user giving an explicit language based feedback. In theory this can make credit assignment significantly easier, however, this method requires greater effort and specificity from human users. 
+% The main challenge for this problem is the pareto frontier between credit assignment and natural deployment. The optimal solution is the most natural in deployment system that doesn't suffer from credit assignment.
+
+
+
+% This is why we have preference learning; Feedback in deployment is sparse and subject to conflicting preferences/varying scrutinies: try to cleanly phrase this as how varying scrutinies appears as conflicting preferences over a long rollout
+
+
+% Points:
+% Reward design for Reinforcement Learning is subject to the designers understanding of preferences; This is why we have preference learning; Feedback in deployment is sparse and subject to conflicting preferences/varying scrutinies: try to cleanly phrase this as how varying scrutinies appears as conflicting preferences over a long rollout
+% Discuss three paradigms: pairwise comparative feedback(PbRL: not natural for deployment); evaulative feedback(sparse feedback signal-> temporal credit assignment); corrective feedback(needs LLMs). Discuss the issues with each: Maybe for andrew in S3 we can discuss why evaluative feedback is the route do go; between section 2 and 3, we should address why we think evaluative feedback is the way to go (minimum human effort) and why we think it will work(enough data? modeling conflicting preferences actually works to our advantage?).
+
+% maybe good to mention some related work in language domain, gemini returned some not sure if actually relevant: Pluralistic Alignment & Personalized RLHF / Group DRO & Minimax Preference Optimization: kk, ill how i can cite
+
+
+
+\section{Proposed Approach} 
+\label{sec:proposed_approach}
+% \textcolor{blue}{(brainstorm some approaches you may take to tackle the challenges. why are these approaches promising or feasible? how will you measure success?)}
+
+We consider a dataset $\mathcal{D} = \{(\tau^{(i)}, y^{(i)}, k^{(i)})\}_{i=1}^N$ of $N$ interactions, where $\tau$ is a trajectory, $k \in \{1, \dots, K\}$ is the identity of the user, and $y$ is their trajectory-level rating. We will start with simulated users whose preferences are known (e.g., ``no high jerk,'' ``no moving within 5cm of cup'') and move toward noisier, more realistic users.
+
+We will train a shared encoder $\phi_\theta(o_t,a_t)$ to extract general features with all the data and a per-user linear head
+$w_k$ to model individual preferences. This produces a step-level reward $r_k(o_t,a_t)=w_k^\top\phi_\theta(o_t,a_t)$:
+\[
+P(y=1\mid\tau,k)=\sum_{t=1}^{T}\sigma\big(r_k(o_t,a_t)\big)
+\]
+
+Through training separate user heads, we can construct a conservative reward model that aims to satisfy the worst-case user at each state by taking the minimum reward across all users heads at every state-action pair:
+\[
+r(o,a)=\min_{k}\, r_k(o,a)
+\]
+
+We will evaluate the conservative reward model against a baseline reward model trained on all ratings (single $w$ head). Our metrics will be (i) held-out rating prediction accuracy per user, (ii) the intersection over union over flagged segments versus known violations segments for simulated users, and potentially (iii) the fraction of users satisfied and the worst-user satisfaction of a downstream policy post-trained with the reward model.
+
+% think it might be good to highlight the difference between what we are doing and general evaluative feedback: Im thinking high level description some formulation for general evaluative feedback and what we are doing (accounting for preferance mismatch in modeling?)
+
+\section{Risks}
+\label{sec:risks}
+% \textcolor{blue}{(what are some risks or roadblocks you anticipate?)}
+We anticipate three main risks. First, since we are collecting trajectory level feedback, the effective preference signal is sparse and has a low signal to noise ratio. This can result in noisy correlations and makes credit assignment difficult. Second, our method assumes that each user sees the robot in many similar situations to be able to isolate their preferences over state features. Finally, we anticipate that a preference conscious formulation may turn out to be very conservative, in fear of getting any negative feedback.
+
+% We are dealing with sparse feedback: credit assignment
+% incompatible preferences can show up in user studies
+% Noise/low SNR
+
+
+%% Use plainnat to work nicely with natbib. 
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+% ------------------------------------------ Putting some possible references in comments here
+% Survey on preference based RL
+% https://jmlr.org/papers/volume18/16-634/16-634.pdf
+% Active Reward Learning:
+% https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=8460854
+
+\[
+p(y=1\mid\tau,k;\theta,w_k)=\exp\Big(\sum_{t=1}^{T} r_k(o_t,a_t)\Big)
+\qquad r_k(o_t,a_t)=w_k^\top\phi_\theta(o_t,a_t)
+\]
+
+Relaxing assumptions: 1) simulated users (real humans are expensive), 2) satisfaction-affecting features are known a priori, 3) demos are collected to easily disentangle features
+
+Create simulated users with consistent criteria based on a set of known features (real humans are expensive)
+
+Collect a set of informative demonstrations and score them with simulated users
+
+
+Train: decompose demonstrations into known feature space and learn user-specific reward models from data
+
+
+
+Eval: does learned reward models match simulated user preferences? How does method behave as we add noise / inconsistency to each simulated user’s internal preferences?
+

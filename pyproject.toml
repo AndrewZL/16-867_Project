@@ -1,0 +1,16 @@
+[project]
+name = "prefrm"
+version = "0.1.0"
+description = "Per-user reward models from sparse, conflicting trajectory ratings"
+requires-python = ">=3.10,<3.13"
+dependencies = ["numpy", "torch", "matplotlib"]
+
+[project.optional-dependencies]
+carla = ["carla==0.9.16", "networkx", "shapely"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["prefrm", "envs"]
