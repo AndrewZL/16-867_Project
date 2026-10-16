@@ -7,6 +7,7 @@ dependencies = ["numpy", "torch", "matplotlib"]
 
 [project.optional-dependencies]
 carla = ["carla==0.9.16", "networkx", "shapely"]
+franka = ["mujoco>=3.2,<4"]
 
 [build-system]
 requires = ["hatchling"]

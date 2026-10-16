@@ -9,6 +9,7 @@ best-of-N reranking. See `proposal.txt`.
 prefrm/        env-agnostic: model.py, users.py, eval.py, run.py
 envs/toy/      2D driving toy (fast, exact ground truth)
 envs/carla/    CARLA 0.9.16: perturbed BehaviorAgent (agent.py), collection (collect.py)
+envs/franka/   Manipulator: pick and place with a cup near the target
 scripts/       carla_server.sh, collect.sh
 ```
 
@@ -18,8 +19,10 @@ An env is a package exposing `FEATURES`, `THR_RANGES`, `GROUPS`, `N_RANDOM`, `ad
 ## Setup
 
 ```bash
-uv sync                 # toy only
-uv sync --extra carla   # + CARLA client
+uv sync                                    # toy only
+uv sync --extra carla                      # + CARLA client
+uv sync --extra franka                     # + MuJoCo
+uv run python -m envs.franka.setup_assets  # + Assets
 ```
 
 CARLA server: `~/carla/CARLA_0.9.16` (override with `CARLA_ROOT`).
@@ -39,6 +42,15 @@ uv run python -m prefrm.run --env carla
 ```
 
 Results land in `out/<env>/`.
+
+## Franka Manipulation task
+
+```bash
+uv run python -m envs.franka.collect --scenarios 150 --cands 2 --seed 0 --out data/franka/train.npz
+uv run python -m envs.franka.collect --scenarios 25 --cands 16 --seed 100 --out data/franka/rerank.npz
+uv run python -m prefrm.run --env franka --eps 0.05
+```
+
 
 ## CARLA notes
 
